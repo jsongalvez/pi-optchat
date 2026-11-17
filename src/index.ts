@@ -562,7 +562,7 @@ export default function optchat(pi: ExtensionAPI) {
       return { messages: [{ role: 'system', content: 'OptChat context unavailable. Stop.', timestamp: 0 }] };
     }
   });
-  pi.on('before_provider_request', (event, ctx) => ctx.model?.api === 'anthropic-messages' ? cachePayload(event.payload) : event.payload);
+  pi.on('before_provider_request', (event, ctx) => ctx.model?.api === 'anthropic-messages' ? cachePayload(event.payload, { ttl: active?.config.cacheTtl ? '1h' : undefined }) : event.payload);
   pi.on('cache_warming_decision', () => ({ action: 'stop' }));
   pi.on('session_before_compact', (_event, ctx) => {
     if (rpcWindow) return; // Its conversation isn't in memory: Pi's compaction keeps it in bounds.

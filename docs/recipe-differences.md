@@ -40,6 +40,8 @@ Anthropic requests split the view into blocks of 4 lines, with cache marks on th
 
 When that view is not cached yet, one compactor call goes first and the others wait until it starts answering, so they read the cache instead of each writing it.
 
+Marks last Anthropic's default 5 minutes unless the profile's **1-hour cache** setting is on, which puts `ttl: '1h'` on every mark (the whole request carries one TTL, as Anthropic requires longer-lived marks first). A turn that starts over 5 minutes after the last one then reads its prefix instead of writing it again: a 1h write costs 2× input, a 5m write 1.25×. The compactor's marks stay at 5 minutes, since its task is never sent again.
+
 ## Additions
 
 Each run's context is the memory view, the previous exchange, and your new message. The additions that change the recipe's behaviour are settings (see [Settings](../README.md#settings)).

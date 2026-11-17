@@ -33,6 +33,9 @@ export const SETTINGS = {
   refreshAt: { kind: 'percent', label: 'Turn refresh threshold', default: 0.3, min: 0, max: 0.9,
     description: 'When a turn fills this share of the context window, it moves into memory and continues in a fresh window. 0%: off (Victor\'s recipe). OPTCHAT_REFRESH_AT overrides it.',
     applies: 'Applies from the next call and to new or resumed subagents.' },
+  cacheTtl: { kind: 'toggle', label: '1-hour cache', default: false,
+    description: 'On: the prompt cache lasts 1 hour, so a turn that starts more than 5 minutes after the last one reads its prefix instead of writing it again (a 1h write costs 2× input, a 5m write 1.25×). Off: 5 minutes, Anthropic\'s default.',
+    applies: 'Applies from the next call.' },
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS;

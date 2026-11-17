@@ -96,6 +96,7 @@ export function createCompressor({ model: resolve, retryable, onUsage = () => {}
           // A shared session id is the OpenAI prompt-cache key; SSE because over a websocket Codex would chain unrelated parallel calls on one cached connection.
           sessionId: 'optchat-compactor', transport: 'sse',
           reasoning: thinking, signal, cacheRetention: 'short',
+          // 5-minute marks: a compaction's task is never sent again, and its prefix is not reused an hour later, so no 1h TTL.
           onPayload: payload => model.api === 'anthropic-messages' ? cachePayload(payload, { end: false }) : payload,
         });
         // The cache entry is usable once the model starts answering.

@@ -21,6 +21,11 @@ export function splitView(text: string) {
  * 60 blocks (240 lines). With the end of the request, that is Anthropic's limit of 4 marks. */
 const MARKS = [0, 20, 40];
 
+/** A mark's cache time-to-live. Anthropic needs a request's marks ordered longest-lived first, so a request takes one TTL for all
+ * of them: '1h' on every mark, or Anthropic's 5-minute default when none is asked for. */
+export type CacheTtl = '1h';
+const cacheMark = (ttl?: CacheTtl) => ttl ? { type: 'ephemeral', ttl } : { type: 'ephemeral' };
+
 /** The status line's own message, in Pi's context and in Anthropic's payload alike. */
 export const isAtWork = (message: unknown) => record(message) && message.role === 'user' && Array.isArray(message.content) && message.content.length === 1
   && record(message.content[0]) && typeof message.content[0].text === 'string' && message.content[0].text.startsWith(AT_WORK);
@@ -34,8 +39,10 @@ function lastBlock(message: Record<string, unknown>) {
  * and pays only for the lines after it. The end mark sits on the last block itself rather than as top-level automatic caching:
  * a proxy or setting that gives block marks a 1h TTL makes Anthropic refuse a top-level mark, whose TTL defaults to 5m, on the
  * same block ("Top-level cache_control has ttl='5m' but the target block already has cache_control with ttl='1h'").
- * `end: false` leaves the end unmarked: a compaction's task is never sent again, so marking it would only write it at 1.25× (#197). */
-export function cachePayload(payload: unknown, { end: markEnd = true } = {}): unknown {
+ * `end: false` leaves the end unmarked: a compaction's task is never sent again, so marking it would only write it at 1.25× (#197).
+ * `ttl` is the lifetime of every mark it writes (see CacheTtl): '1h' keeps a request's prefix readable long after the 5-minute default,
+ * so a turn that starts over 5 minutes after the last one reads it instead of writing it again. */
+export function cachePayload(payload: unknown, { end: markEnd = true, ttl }: { end?: boolean; ttl?: CacheTtl } = {}): unknown {
   if (!record(payload) || !Array.isArray(payload.messages)) return payload;
   const messages = payload.messages;
   const view = new Set<unknown>();
@@ -48,7 +55,7 @@ export function cachePayload(payload: unknown, { end: markEnd = true } = {}): un
     // they can read one another's entry.
     const text: string = message.content[at].text, close = text.indexOf('\n</chat>'), end = close < 0 ? text.length : close + '\n</chat>'.length;
     const pieces = splitView(text.slice(0, end)), marked = new Set(MARKS.map(back => pieces.length - 2 - back));
-    const blocks = pieces.map((text, j) => ({ type: 'text', text, ...(marked.has(j) ? { cache_control: { type: 'ephemeral' } } : {}) }));
+    const blocks = pieces.map((text, j) => ({ type: 'text', text, ...(marked.has(j) ? { cache_control: cacheMark(ttl) } : {}) }));
     message.content.splice(at, 1, ...blocks, ...(end < text.length ? [{ type: 'text', text: text.slice(end) }] : []));
     for (const block of blocks) view.add(block);
     break;
@@ -68,7 +75,7 @@ export function cachePayload(payload: unknown, { end: markEnd = true } = {}): un
   const [before, last] = messages.filter(message => !record(message) || message.role !== 'system').slice(-2);
   const turn = isAtWork(last) && record(before) && before.role === 'user' ? lastBlock(before) : undefined;
   const end = markEnd ? turn ?? endBlock(messages) : undefined;
-  if (end) end.cache_control = { type: 'ephemeral' };
+  if (end) end.cache_control = cacheMark(ttl);
   return payload;
 }
 

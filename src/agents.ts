@@ -364,7 +364,8 @@ export class Children {
           // Set by launch for a sibling's first request; a stop or an interrupt aborts the request, which ends the wait.
           const live = this.running.get(id), primed = live?.primed;
           if (live && primed) { live.primed = undefined; await abortable(primed, ctx.signal); }
-          return ctx.model?.api === 'anthropic-messages' ? cachePayload(event.payload) : event.payload;
+          // The profile's TTL on every mark (1-hour cache), read per request like the other settings; the compactor keeps 5 minutes.
+          return ctx.model?.api === 'anthropic-messages' ? cachePayload(event.payload, { ttl: this.settings.cacheTtl ? '1h' : undefined }) : event.payload;
         });
       }],
     });
