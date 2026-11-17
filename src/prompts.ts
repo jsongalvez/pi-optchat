@@ -11,7 +11,7 @@ export const modelsHint = ({ provider, model, thinking }: ModelChoice) =>
 /** What this agent's subagents get by default (`children`), and how a task overrides it, so the agent has no gap to fill from
  * memory when it spawns (the same reason as modelsHint). It is the profile's choice for subagents, not what the agent itself got. */
 export const memoryHint = (children: 'view' | 'none') => children === 'view'
-  ? 'Subagents see your memory view by default; a self-contained or blind task sets memory: \'none\' to start with its task alone.'
+  ? 'Subagents see your memory view by default; a self-contained task sets memory: \'none\' to start with its task alone, and a blind task sets context: \'none\' to start without the context files.'
   : 'Subagents get no memory view, as this profile sets: a task that needs your chat\'s context sets memory: \'view\'.';
 export const MASTER = `You are OptChat, an AI agent that works for one user in a single chat that
 never ends. Each turn starts with the view below, followed by the user's new
@@ -73,8 +73,8 @@ user completes this conversation, you write a handoff for the main agent.`;
 
 // Subagent instructions, joined after the user's own (AGENTS.md etc.): one of the two delegation paragraphs,
 // then STEERABLE, then the connected or plain tell_parent paragraph.
-/** `childrenMemory`: what this agent's subagents get by default, or undefined when the agent itself has no view: its children stay
- * blind too, as containment (a task's memory changes nothing then), so the prompt names no view at all. */
+/** `childrenMemory`: what this agent's subagents get by default, or undefined when the agent itself has no view: its children get
+ * no view too, as containment (a task's memory changes nothing then), so the prompt names no view at all. */
 export const delegation = (maxAgents: number, choice: ModelChoice, childrenMemory?: 'view' | 'none') => `You may delegate parts of your assigned task with spawn when useful. Child reports arrive automatically after your current run ends; the harness keeps you alive to receive them. Never poll, sleep, or wait in a tool for children. Finish your current work and return; you will be prompted with their results. The profile allows ${maxAgents} active agents total. ${modelsHint(choice)}${childrenMemory ? ` ${memoryHint(childrenMemory)}` : ''}`;
 export const NO_DELEGATION = 'You are at the maximum delegation depth. Complete your task with your own tools.';
 /** Pi hands steering to a run only between tool calls, so one long command keeps the parent and the user from reaching it. */

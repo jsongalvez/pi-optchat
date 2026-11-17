@@ -15,7 +15,7 @@ import type { Memory } from './memory.ts';
 import type { ModelChoice } from './profiles.ts';
 import { cachePayload } from './core/cache.ts';
 import { childInput } from './core/messages.ts';
-import { alive, runMessages, runsElsewhere, CUT_OFF, reportHead, RunHistory, isActiveRun, isRunning, transition, sessionMessages, savedSession, undelivered, sentText, queuedWindows, unqueueWindow, type Guidance, type MemoryFrom, type RemoteWindow, type RunInfo, type RunState, type FinishReason } from './runs.ts';
+import { alive, runMessages, runsElsewhere, CUT_OFF, reportHead, RunHistory, isActiveRun, isRunning, transition, sessionMessages, savedSession, undelivered, sentText, queuedWindows, unqueueWindow, type ContextFrom, type Guidance, type MemoryFrom, type RemoteWindow, type RunInfo, type RunState, type FinishReason } from './runs.ts';
 import { UsageLedger } from './usage.ts';
 import { fullChat, refreshFraction, textContent } from './transcript.ts';
 import { Type, type Static } from 'typebox';
@@ -83,10 +83,13 @@ const CWD_DOC = 'Project directory the subagent works in (~ allowed); its AGENTS
 export const TASKS = Type.Array(Type.Object({ task: Type.String(), title: Type.Optional(Type.String({ description: TITLE_DOC })), cwd: Type.Optional(Type.String({ description: CWD_DOC })),
   model: Type.Optional(Type.String({ description: 'Leave unset for the profile\'s subagent model (named in your instructions). Set only when the user asks for a model, as provider/id from models().' })),
   thinking: Type.Optional(StringEnum(THINKING, { description: 'Leave unset for the profile\'s subagent level. Set only when the user asks for one.' })),
-  memory: Type.Optional(StringEnum(['view', 'none'], { description: 'Leave unset for the profile\'s default for subagents (your instructions name it). \'none\' starts the child with its task alone: no view, no zoom/date, for self-contained or blind work. \'view\' asks for the view when the profile sets none.' })) }), { minItems: 1 });
+  memory: Type.Optional(StringEnum(['view', 'none'], { description: 'Leave unset for the profile\'s default for subagents (your instructions name it). \'none\' starts the child with its task alone: no view, no zoom/date. \'view\' asks for the view when the profile sets none.' })),
+  context: Type.Optional(StringEnum(['files', 'none'], { description: 'Leave unset to start the child with the context files every session loads: the host AGENTS.md and the project\'s own. \'none\' starts it with no context files at all, so it reads only its task and its instructions: that is how a blind run or an independent judge is started, and its own children stay without them too.' })) }), { minItems: 1 });
 export type Task = Static<typeof TASKS>[number];
 /** What a task's `memory` comes out as, and why: the four rows of the precedence (see `launch`). */
 type EffectiveMemory = { memory: 'view' | 'none'; memoryFrom: MemoryFrom };
+/** What a task's `context` comes out as, and why: a blind parent keeps its own children blind, a task's own choice comes next. */
+type EffectiveContext = { context: 'files' | 'none'; contextFrom: ContextFrom };
 /** The tool beside spawn that lists what a task's `model` may be. */
 export const modelsTool = (children: () => Children) => ({ name: 'models', label: 'List models',
   description: 'The models a spawn task may name, as provider/id, with the profile\'s subagent default marked. provider narrows the list to one provider.',
@@ -246,10 +249,12 @@ export class Children {
   private async launch(tasks: Task[], cwd: string, signal: AbortSignal | undefined, parentId: string | undefined, connected = false) {
     for (const directory of tasks.map(t => taskDirectory(cwd, t.cwd))) if (!existsSync(directory) || !statSync(directory).isDirectory()) throw new Error(`No such directory: ${directory}`);
     const profile = this.choice();
-    // Containment: a child spawned without the view stays blind in its own children too, so a blind parent's helpers cannot read the
-    // chat. The view itself would be there to render (it comes from profile memory), so this is a rule, not a limit; it wins over the
-    // task and the setting alike.
+    // Containment: a child spawned without the view keeps its own children without it too, so a viewless parent's helpers cannot
+    // read the chat. The view itself would be there to render (it comes from profile memory), so this is a rule, not a limit; it
+    // wins over the task and the setting alike.
     const parentViewless = parentId !== undefined && this.running.get(parentId)?.info.memory === 'none';
+    // The same containment for the context files: a blind child's helpers must not read the files it was kept from.
+    const parentBlind = parentId !== undefined && this.running.get(parentId)?.info.context === 'none';
     // Read with the other spawn-time settings, before the memory settles, so one spawn sees one value of it.
     const { subagentMemory } = this.settings;
     const runs = tasks.map(task => {
@@ -262,7 +267,10 @@ export class Children {
         : task.memory ? { memory: task.memory === 'none' ? 'none' : 'view', memoryFrom: 'task' }
         : subagentMemory ? { memory: 'view', memoryFrom: 'default' }
         : { memory: 'none', memoryFrom: 'setting' };
-      return { ...task, model, thinking: task.thinking ?? profile.thinking, ...memory };
+      const context: EffectiveContext = parentBlind ? { context: 'none', contextFrom: 'inherited' }
+        : task.context ? { context: task.context === 'none' ? 'none' : 'files', contextFrom: 'task' }
+        : { context: 'files', contextFrom: 'default' };
+      return { ...task, model, thinking: task.thinking ?? profile.thinking, ...memory, ...context };
     });
     if (this.closing) throw new Error('Profile is closing.');
     this.settling++;
@@ -279,14 +287,14 @@ export class Children {
     const launched = await this.track(this.launchBatch({ tasks: runs, cwd, depth, parentId, connected, signal, cancelled }));
     // Grouped, the last child of this spawn to finish delivers every report; otherwise each reports on its own.
     const batch = groupReports && !connected ? { ids: launched.map(c => c.info.id), reports: new Map<string, string>() } : undefined;
-    // Siblings on one model, directory and memory choice send the same system prompt, tools and view. Anthropic can't read a cache entry
+    // Siblings on one model, directory, memory and context choice send the same system prompt, tools and view. Anthropic can't read a cache entry
     // still being written, so their first requests wait until the first sibling starts answering and read its entry instead.
     const [first] = launched, answered = launched.length > 1 && first.session.model?.api === 'anthropic-messages' ? answering(first.session) : undefined;
     for (const live of launched) {
       live.batch = batch;
       const work = this.execute(live, live.info.memory === 'none' ? live.info.task : childInput({ view, task: live.info.task })).catch(error => this.warn(`Subagent completion failed: ${String(error)}`))
         .finally(() => { this.completions.delete(work); this.changed(); });
-      if (live === first && answered) for (const sibling of launched.slice(1)) if ((['model', 'thinking', 'cwd', 'memory'] as const).every(k => sibling.info[k] === first.info[k])) sibling.primed = Promise.race([answered, work]);
+      if (live === first && answered) for (const sibling of launched.slice(1)) if ((['model', 'thinking', 'cwd', 'memory', 'context'] as const).every(k => sibling.info[k] === first.info[k])) sibling.primed = Promise.race([answered, work]);
       this.completions.add(work);
       live.completion = work;
     }
@@ -300,7 +308,7 @@ export class Children {
     launch.then(done, done);
     return launch;
   }
-  private async launchBatch({ tasks, cwd, depth, parentId, connected, signal, cancelled }: { tasks: (Omit<Task, 'model' | 'thinking' | 'memory'> & { model: Model<Api>; thinking: ModelChoice['thinking'] } & EffectiveMemory)[]; cwd: string; depth: number;
+  private async launchBatch({ tasks, cwd, depth, parentId, connected, signal, cancelled }: { tasks: (Omit<Task, 'model' | 'thinking' | 'memory' | 'context'> & { model: Model<Api>; thinking: ModelChoice['thinking'] } & EffectiveMemory & EffectiveContext)[]; cwd: string; depth: number;
     parentId?: string; connected: boolean; signal?: AbortSignal; cancelled: () => boolean }) {
     const launched: LiveRun[] = [];
     let reserved = tasks.length;
@@ -310,12 +318,12 @@ export class Children {
         signal?.throwIfAborted();
         if (cancelled()) throw new Error('Parent or profile is stopping.');
         const id = randomUUID().slice(0, 8), directory = taskDirectory(cwd, task.cwd);
-        const session = await this.open({ id, directory, depth, parentId, connected, model: task.model, thinking: task.thinking, memory: task.memory,
+        const session = await this.open({ id, directory, depth, parentId, connected, model: task.model, thinking: task.thinking, memory: task.memory, context: task.context,
           sessionManager: SessionManager.create(directory, join(this.profileDirectory, 'runs')) });
         // One short line without brackets, so the `[id · title]` head of its reports stays parseable and small.
         const title = oneLine(task.title ?? '').replace(/[[\]]/g, '').trim().slice(0, 128).trimEnd();
         const info: RunInfo = { id, task: task.task, ...(title ? { title } : {}), cwd: directory, model: `${task.model.provider}/${task.model.id}`, thinking: session.thinkingLevel,
-          parentSession: this.options.parentSession ?? '', parentId, depth, sessionFile: session.sessionFile, started: Date.now(), state: 'running', guidance: [], ...(connected ? { connected: true } : {}), memory: task.memory, memoryFrom: task.memoryFrom };
+          parentSession: this.options.parentSession ?? '', parentId, depth, sessionFile: session.sessionFile, started: Date.now(), state: 'running', guidance: [], ...(connected ? { connected: true } : {}), memory: task.memory, memoryFrom: task.memoryFrom, context: task.context, contextFrom: task.contextFrom };
         const live: LiveRun = { session, info, updated: Date.now(), tools: new Map(), pendingReports: [], pendingGuidance: [], steering: Promise.resolve() };
         launched.push(live); this.save(info); this.running.set(id, live);
         this.launching--; reserved--;
@@ -338,14 +346,14 @@ export class Children {
   }
   /** Builds a child session with the same prompt, tools and extensions whether it is new or resumed. */
   private async open(o: { id: string; directory: string; depth: number; parentId?: string; connected: boolean; model: Model<Api>;
-    thinking?: ModelChoice['thinking']; memory?: Task['memory']; sessionManager: SessionManager }) {
+    thinking?: ModelChoice['thinking']; memory?: Task['memory']; context?: Task['context']; sessionManager: SessionManager }) {
     const { id, directory, depth, parentId, connected } = o, viewless = o.memory === 'none';
     const { subagentLevels, maxAgents, memorySearch } = this.settings, delegates = depth < subagentLevels;
     // The user's settings list their installed packages; a copy in memory keeps the child from writing them back.
     const settingsManager = SettingsManager.inMemory({ ...SettingsManager.create(directory, getAgentDir()).getSettings(),
       compaction: subagentCompaction(o.model.contextWindow, refreshFraction(this.settings.refreshAt)), cacheWarming: 'off' });
     const loader = new DefaultResourceLoader({ cwd: directory, agentDir: getAgentDir(), settingsManager,
-      noPromptTemplates: true,
+      noPromptTemplates: true, noContextFiles: o.context === 'none',
       extensionsOverride: base => ({ ...base, extensions: base.extensions.filter(e => !isOptchat(e.resolvedPath)) }),
       extensionFactories: [...builtinExtensions(this.options.builtins?.() ?? []), pi => {
         const provider = this.registry.getRegisteredProviderConfig(o.model.provider);
@@ -672,7 +680,7 @@ export class Children {
     try {
       // No thinking level: the session restores the one it ran with. The memory choice comes from the record, not the profile setting,
       // which may have changed since: a resume keeps what the run already had.
-      const session = await this.open({ id, directory: run.cwd, depth: run.depth, parentId: run.parentId, connected: false, model, memory: run.memory, sessionManager: manager });
+      const session = await this.open({ id, directory: run.cwd, depth: run.depth, parentId: run.parentId, connected: false, model, memory: run.memory, context: run.context, sessionManager: manager });
       // stop() cannot see this child until it is registered, so a parent stopped meanwhile must cancel it here.
       const parent = run.parentId ? this.running.get(run.parentId) : undefined;
       if (this.closing || run.parentId && (!parent || !['running', 'waiting', 'paused'].includes(parent.info.state))) {

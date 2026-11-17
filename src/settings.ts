@@ -13,7 +13,7 @@ export const SETTINGS = {
     description: 'On: subagents from one spawn report together, once the last finishes. Off: each reports when done (Victor\'s recipe).',
     applies: 'Applies to the next spawn.' },
   subagentMemory: { kind: 'toggle', label: 'Subagent memory view', default: true,
-    description: 'On: subagents get the memory view (Victor\'s recipe). Off: each starts with its task alone, with no view, zoom, date or search, for self-contained or blind work. A spawn task\'s memory overrides it.',
+    description: 'On: subagents get the memory view (Victor\'s recipe). Off: each starts with its task alone, with no view, zoom, date or search. A spawn task\'s memory overrides it; context files are a separate choice, a task\'s context: \'none\'.',
     applies: 'Applies to the next spawn. Toggling re-caches the prompt once.' },
   previousExchange: { kind: 'toggle', label: 'Previous exchange', default: true,
     description: 'Send your last request and its answer in full with the next turn, so follow-ups see the exact wording. Off: memory view only (Victor\'s recipe).',

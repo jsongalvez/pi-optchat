@@ -15,7 +15,9 @@ export const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ma
 export interface ModelChoice { provider: string; model: string; thinking: typeof THINKING[number] }
 export const dataHome = () => resolve(process.env.OPTCHAT_HOME ?? join(homedir(), '.optchat'));
 /** `main` is the last model and thinking level picked in Pi while this profile was open, recorded on the first open too. */
-export interface ProfileConfig extends Settings { compactor: ModelChoice; subagent: ModelChoice; main?: ModelChoice }
+export interface ProfileConfig extends Settings { compactor: ModelChoice; subagent: ModelChoice; main?: ModelChoice;
+  /** The repository this profile works on (`~` allowed). The main agent reads its `AGENTS.md` after the profile's own files; a subagent never does, and nothing else here reads it. */
+  project?: string }
 /** A new profile's config. One shared object: copy it, don't change it. */
 export const defaults: ProfileConfig = {
   compactor: { provider: 'anthropic', model: 'claude-sonnet-5-5', thinking: 'medium' },
@@ -77,9 +79,9 @@ function modelChoice(value: unknown): value is ModelChoice {
 }
 export const loadConfig = (dir: string) => parseConfig(dir, JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')));
 function parseConfig(dir: string, value: unknown): ProfileConfig {
-  if (!record(value) || !modelChoice(value.compactor) || !modelChoice(value.subagent) || value.main !== undefined && !modelChoice(value.main)) throw new Error(`Invalid profile config: ${dir}/config.json`);
-  const { compactor, subagent, main } = value;
-  try { return { compactor, subagent, ...main && { main }, ...readSettings(value) }; }
+  if (!record(value) || !modelChoice(value.compactor) || !modelChoice(value.subagent) || value.main !== undefined && !modelChoice(value.main) || value.project !== undefined && typeof value.project !== 'string') throw new Error(`Invalid profile config: ${dir}/config.json`);
+  const { compactor, subagent, main, project } = value;
+  try { return { compactor, subagent, ...main && { main }, ...project !== undefined && { project }, ...readSettings(value) }; }
   catch (error) { throw new Error(`Invalid profile config: ${dir}/config.json: ${error instanceof Error ? error.message : String(error)}`); }
 }
 /** What another app may change: any setting, and the compactor or subagent model. The main model follows Pi's own pick. */
@@ -108,6 +110,21 @@ export function patchConfigFile(dir: string, patch: ConfigPatch) {
   return config;
 }
 export function readInstructions(dir: string) { return readFileSync(join(dir, 'AGENTS.md'), 'utf8'); }
+/** The lead's own file, beside the profile's `AGENTS.md`: duties only this profile's main agent reads. Missing is not an
+ * error (an older or a fresh profile has none): the lead's turn must run, and it simply carries no lead layer. */
+export function readLead(dir: string) {
+  try { return readFileSync(join(dir, 'LEAD.md'), 'utf8'); } catch { return ''; }
+}
+/** The project directory a profile's `project` names, `~` expanded as a task's `cwd` is. */
+const projectDirectory = (project: string) => resolve(project.replace(/^~(?=$|[\\/])/, homedir()));
+/** What the MAIN agent's `sections.instructions` carries, in this order: the profile's `AGENTS.md`, then its `LEAD.md`,
+ * then the `AGENTS.md` of the `project` repo it works on. Subagents take `readInstructions(dir)` alone (`agents.ts`), so
+ * a lead file never reaches one; both parts are read every turn, so a save applies from the next one. */
+export function leadInstructions(dir: string, project?: string) {
+  let projectRules = '';
+  if (project) { try { projectRules = readFileSync(join(projectDirectory(project), 'AGENTS.md'), 'utf8'); } catch { projectRules = ''; } }
+  return [readInstructions(dir), readLead(dir), projectRules].filter(text => text.trim()).join('\n\n');
+}
 /** The profile's instructions, read again each turn, so a save applies from the next one. */
 export function saveInstructions(dir: string, text: string) { atomicWrite(join(dir, 'AGENTS.md'), text); }
 export function lastProfile() {

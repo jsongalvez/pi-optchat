@@ -94,7 +94,7 @@ Compression and subagents make extra model requests with your provider credentia
 | Subagent levels | 1 | 1: only the main agent starts subagents. 2 or more: subagents may start their own, that many levels deep. Applies to subagents started or resumed after the change. |
 | Max active agents | 8 | Subagents running at once in the profile, all levels together, so it also caps how deep a chain can go. |
 | Group subagent reports | off | Off: each subagent reports as soon as it finishes (the recipe). On: the subagents started by one spawn report together, in one message once the last of them finishes. Applies to the next spawn. |
-| Subagent memory view | on | On: subagents get the profile's memory view and read-only `zoom`/`date`, as in the recipe. Off: each starts with its task alone, with no view, `zoom`/`date` or `search`, which suits self-contained or blind work. A spawn task's `memory` overrides it either way. Applies to the next spawn. |
+| Subagent memory view | on | On: subagents get the profile's memory view and read-only `zoom`/`date`, as in the recipe. Off: each starts with its task alone, with no view, `zoom`/`date` or `search`. A spawn task's `memory` overrides it either way. Applies to the next spawn. The context files a child loads are a separate choice: a task's `context: 'none'` (see [Subagents](docs/subagents.md#what-a-child-gets)). |
 | Previous exchange | on | Replays your last request and answer in full with the next turn. Off is the recipe. |
 | Previous exchange limit | 16 KB | A larger last exchange is left out. |
 | Memory search | off | Gives the agent, and subagents started or resumed after the change, a `search` tool over your original messages. Off is the recipe: zoom and date only. Applies from the next turn. |

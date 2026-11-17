@@ -10,6 +10,9 @@ export type RunState = typeof runStates[number];
 /** Where a run's memory choice came from: its task's own `memory`, the profile setting set to no view, a parent without the view (which always wins), or nothing naming one, so the view. */
 export const memorySources = ['task', 'setting', 'inherited', 'default'] as const;
 export type MemoryFrom = typeof memorySources[number];
+/** Where a run's context-file choice came from: its task's own `context`, a parent started without the files (which always wins), or nothing naming one, so the files load. */
+export const contextSources = ['task', 'inherited', 'default'] as const;
+export type ContextFrom = typeof contextSources[number];
 const finishReasons = ['complete', 'disconnected', 'owner-stopped', 'failed'] as const;
 export type FinishReason = typeof finishReasons[number];
 export const isFinishReason = (value: unknown): value is FinishReason => finishReasons.some(reason => reason === value);
@@ -26,6 +29,12 @@ export interface RunInfo {
   memory?: 'view' | 'none';
   /** Where `memory` came from (see `memorySources`), so an explicit choice reads differently from the default. Unset in older records. */
   memoryFrom?: MemoryFrom;
+  /** Whether its session loaded context files: `none` means the host AGENTS.md and the project's own were kept out, so the child
+   * read only its task and its instructions. Unset in records saved before this was written, which loaded them. A resume keeps
+   * the saved choice instead of loading the files the run was denied. */
+  context?: 'files' | 'none';
+  /** Where `context` came from (see `contextSources`). Unset in older records. */
+  contextFrom?: ContextFrom;
   /** A connected window whose agent runs in its own Pi process (an RPC host's second session on a busy profile): `pid` is that
    * process, `session` its Pi session file, read when the window ends. The record is all this process has of it. `after`: a window
    * that went on after /complete shares that session with the conversations before it, so only its messages from then on are its. */
@@ -49,6 +58,8 @@ function isRun(value: unknown): value is RunInfo {
     && (value.connected === undefined || typeof value.connected === 'boolean')
     && (value.memory === undefined || value.memory === 'view' || value.memory === 'none')
     && (value.memoryFrom === undefined || memorySources.includes(value.memoryFrom as MemoryFrom))
+    && (value.context === undefined || value.context === 'files' || value.context === 'none')
+    && (value.contextFrom === undefined || contextSources.includes(value.contextFrom as ContextFrom))
     && (value.cutOff === undefined || typeof value.cutOff === 'boolean')
     && (value.window === undefined || record(value.window) && typeof value.window.pid === 'number' && (value.window.session === undefined || typeof value.window.session === 'string')
       && (value.window.after === undefined || typeof value.window.after === 'number'))

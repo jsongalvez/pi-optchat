@@ -9,7 +9,7 @@ import { Type } from 'typebox';
 import { Memory } from './memory.ts';
 import { atomicWrite, storeFor } from './store.ts';
 import { createCompressor } from './compactor.ts';
-import { applyConfig, createProfile, describeOwner, holdProfile, isWindows, lastProfile, listProfiles, loadConfig, memoryDirectory, profilePath, readInstructions, type ModelChoice, rememberProfile, saveInstructions, ProfileBusyError, type ConfigPatch, type ProfileConfig } from './profiles.ts';
+import { applyConfig, createProfile, describeOwner, holdProfile, isWindows, lastProfile, leadInstructions, listProfiles, loadConfig, memoryDirectory, profilePath, readInstructions, type ModelChoice, rememberProfile, saveInstructions, ProfileBusyError, type ConfigPatch, type ProfileConfig } from './profiles.ts';
 import { allowSearch, CONTINUITY, IMPORT_GUIDANCE, SEARCH_DOC, TURN_REFRESHED, VIEW_DOC } from './core/prompts.ts';
 import { MASTER, memoryHint, modelsHint } from './prompts.ts';
 import { cachePayload, record } from './core/cache.ts';
@@ -476,7 +476,7 @@ export default function optchat(pi: ExtensionAPI) {
     // Pi's own prompt sections (AGENTS.md files, skills, cwd) stay; the profile's instructions go last.
     syncSearch(a.config);
     event.systemPromptOptions.customPrompt = allowSearch(`${MASTER}\n\n${modelsHint(a.config.subagent)}\n\n${memoryHint(a.config.subagentMemory ? 'view' : 'none')}\n\n${VIEW_DOC}${a.config.previousExchange ? CONTINUITY : ''}${a.config.memorySearch ? SEARCH_DOC : ''}`, a.config.memorySearch);
-    event.systemPromptOptions.sections.instructions = `${readInstructions(a.dir)}\n\n${IMPORT_GUIDANCE}`;
+    event.systemPromptOptions.sections.instructions = `${leadInstructions(a.dir, a.config.project)}\n\n${IMPORT_GUIDANCE}`;
     refreshContextFiles(event.systemPromptOptions);
     prompt = event.systemPrompt;
   });
@@ -600,7 +600,7 @@ export default function optchat(pi: ExtensionAPI) {
     if (tools.includes('search') !== memorySearch) pi.setActiveTools(memorySearch ? [...tools, 'search'] : tools.filter(name => name !== 'search'));
   };
   pi.registerTool({ name: 'spawn', label: 'Spawn background agents',
-    description: 'Start background subagents, returning IDs immediately. Use only when the user asks. Give each task the cwd of the project it works on, so the subagent starts there with that project\'s AGENTS.md. Leave a task\'s model unset for the profile\'s default; name one only when the user asks, with an id from models(). Leave a task\'s memory unset for the profile\'s default, which your instructions name: with the view it also gets read-only zoom/date, and without it only its task, for self-contained or blind work. Whether children may delegate further, and how many agents may run at once, is set per profile. Completion reports arrive automatically; never poll or sleep waiting for them.',
+    description: 'Start background subagents, returning IDs immediately. Use only when the user asks. Give each task the cwd of the project it works on, so the subagent starts there with that project\'s AGENTS.md. Leave a task\'s model unset for the profile\'s default; name one only when the user asks, with an id from models(). Leave a task\'s memory unset for the profile\'s default, which your instructions name: with the view it also gets read-only zoom/date, and without it only its task. A task that must not read the context files (the host file and the project\'s AGENTS.md) sets context: \'none\': that is how an independent judge or a blind run is started, and its own children stay without them. Whether children may delegate further, and how many agents may run at once, is set per profile. Completion reports arrive automatically; never poll or sleep waiting for them.',
     parameters: Type.Object({ tasks: TASKS }),
     async execute(_id, args, signal, _update, ctx) {
       const text = await required().children.start(args.tasks, ctx.cwd, signal); status(ctx);
