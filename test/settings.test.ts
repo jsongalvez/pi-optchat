@@ -206,6 +206,7 @@ test('the settings page saves a valid number and explains an invalid one', () =>
   const dir = mkdtempSync(join(tmpdir(), 'optchat-page-'));
   try {
     const config: ProfileConfig = { ...defaults, compactor: { provider: 'anthropic', model: 'claude-haiku-4-5', thinking: 'low' } };
+    saveConfig(dir, config);  // a profile always has its config.json
     const page = settingsPage(plain, { profile: 'demo', config, models: [{ name: 'anthropic/claude-sonnet-5-5', thinking: ['low', 'medium'] }], dir }, () => {});
     const type = (...keys: string[]) => { for (const key of keys) page.handleInput(key); };
     assert.match(page.render(100).join('\n'), /Subagent levels\s+1  default\n/);
@@ -226,6 +227,7 @@ test('the settings page shows the Subagent memory view row and saves it toggled 
   const dir = mkdtempSync(join(tmpdir(), 'optchat-page-'));
   try {
     const config: ProfileConfig = { ...defaults };
+    saveConfig(dir, config);  // a profile always has its config.json
     const page = settingsPage(plain, { profile: 'demo', config, models: [{ name: 'anthropic/claude-sonnet-5-5', thinking: ['low', 'medium'] }], dir }, () => {});
     assert.match(page.render(100).join('\n'), /Subagent memory view\s+on  default\n/);
     // Down past the two model rows and the three subagent ones above it, then toggle it.
@@ -334,6 +336,7 @@ test('the thinking step offers only levels the model takes, so Sonnet 5.5 has no
   const dir = mkdtempSync(join(tmpdir(), 'optchat-page-'));
   try {
     const config: ProfileConfig = { ...defaults };
+    saveConfig(dir, config);  // a profile always has its config.json
     const page = settingsPage(plain, { profile: 'demo', config, dir,
       models: [{ name: 'anthropic/claude-sonnet-5-5', thinking: ['low', 'medium', 'high'] }] }, () => {});
     page.handleInput('\r'); // open Compactor model

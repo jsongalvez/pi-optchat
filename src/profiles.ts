@@ -68,10 +68,15 @@ export function createProfile(name: string, home = dataHome()) {
   }
 }
 export function saveConfig(dir: string, config: ProfileConfig) { atomicWrite(join(dir, 'config.json'), JSON.stringify(config, null, 2) + '\n'); }
-/** Saves a change and applies it to `config`, the object a running Pi reads its settings from; throws if it can't be written. */
+/** Saves a change and applies it to `config`, the object a running Pi reads its settings from; throws if it can't be written.
+ * The change is applied to the file as it is now, not to `config`: that copy was read when Pi started, and writing it back
+ * would erase every key set in the file since (a lost update; the profile's `project` was lost this way). */
 export function applyConfig(dir: string, config: ProfileConfig, patch: Partial<ProfileConfig>) {
-  saveConfig(dir, { ...config, ...patch });
-  Object.assign(config, patch);
+  const raw: unknown = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+  if (!record(raw)) throw new Error(`Invalid profile config: ${dir}/config.json`);
+  const next = { ...raw, ...patch }, parsed = parseConfig(dir, next);
+  atomicWrite(join(dir, 'config.json'), JSON.stringify(next, null, 2) + '\n');
+  Object.assign(config, parsed);
 }
 function modelChoice(value: unknown): value is ModelChoice {
   return record(value) && typeof value.provider === 'string' && typeof value.model === 'string'

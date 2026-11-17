@@ -98,6 +98,7 @@ test('the settings page lists the 1-hour cache and saves it on', () => {
   const dir = mkdtempSync(join(tmpdir(), 'optchat-cache-page-'));
   try {
     const config = { ...defaults };
+    saveConfig(dir, config);  // a profile always has its config.json
     const page = settingsPage(plain, { profile: 'demo', config, models: [{ name: 'anthropic/claude-sonnet-5-5', thinking: ['low', 'medium'] }], dir }, () => {});
     assert.match(page.render(120).join('\n'), /1-hour cache\s+off  default\n/);
     // Down past the two model rows and the ten settings above it, then toggle it.
