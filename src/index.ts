@@ -226,7 +226,7 @@ export default function optchat(pi: ExtensionAPI) {
       await old.memory.close(); await checkpoints;
     } finally {
       await old.memory.close(); await old.unlock(); active = undefined;
-      run = []; previous = []; logged = 0; keep = 0; view = undefined; runStarted = false; receipts.clear(); prompt = ''; idle = () => true;
+      run = []; announced.clear(); previous = []; logged = 0; keep = 0; view = undefined; runStarted = false; receipts.clear(); prompt = ''; idle = () => true;
       untitle?.(); untitle = undefined; title.clear(); working = false;
     }
   };
@@ -470,7 +470,7 @@ export default function optchat(pi: ExtensionAPI) {
     if (rpcWindow) { await rpcWindow.beforeRun(event); return; }
     if (!active) return; // Plain Pi run: leave Pi's own prompt untouched.
     const a = active;
-    flush(); run = []; logged = 0; keep = 0; view = undefined; runStarted = true; wake = event.messageType === 'custom';
+    flush(); run = []; announced.clear(); logged = 0; keep = 0; view = undefined; runStarted = true; wake = event.messageType === 'custom';
     previous = a.config.previousExchange ? previousExchange(ctx.sessionManager.getBranch(), a.config.previousExchangeKB * 1000) : [];
     pi.appendEntry(RUN_BOUNDARY, { state: 'start' });
     // Pi's own prompt sections (AGENTS.md files, skills, cwd) stay; the profile's instructions go last.
@@ -481,9 +481,33 @@ export default function optchat(pi: ExtensionAPI) {
     prompt = event.systemPrompt;
   });
   const DUPLICATE_REPORT = '(duplicate report, already delivered)';
+  // A message Pi commits without announcing it (an extension's agent_before_settle entries, which continue the run) reaches only
+  // Pi's own context; context_with_system admits it from there, or the turn goes on without it
+  // (and Anthropic's message threads, given nothing new, answer 400 "messages must contain at least one 'user' or 'assistant' message").
+  const announced = new Set<string>();
+  // By content: Pi gives a committed custom message a new timestamp.
+  const signature = (m: AgentMessage) => `${m.role}|${m.role === 'custom' ? m.customType : ''}|${'content' in m ? textContent(m.content) : ''}`;
   pi.on('message_end', async (event, ctx) => {
     if (!active || !runStarted) return;
-    const bounded = boundedMessage(event.message);
+    announced.add(signature(event.message));
+    const result = await admit(event.message, ctx);
+    if (result) announced.add(signature(result.message)); // What Pi keeps in its context.
+    return result;
+  });
+  async function admitMissed(canonical: AgentMessage[], ctx: ExtensionContext) {
+    let start = canonical.length;
+    while (start > 0 && !announced.has(signature(canonical[start - 1]))) start--;
+    if (start === 0) return; // Nothing of this run in Pi's context yet: nothing to compare.
+    for (const message of canonical.slice(start)) {
+      if (message.role !== 'custom' && message.role !== 'user') continue;
+      announced.add(signature(message));
+      await admit(message, ctx);
+    }
+  }
+  async function admit(original: AgentMessage, ctx: ExtensionContext) {
+    if (!active) return;
+    const bounded = boundedMessage(original);
+    announced.add(signature(bounded)); // Pi's context holds the bounded copy.
     // Pi puts the message that starts a run first, before any context it or other extensions inject.
     const message = asUser(bounded, wake); if (bounded.role !== 'system') wake = false;
     // Before the message is logged, so the image its text names is already there for zoom; zoom's own images are kept already.
@@ -516,8 +540,8 @@ export default function optchat(pi: ExtensionAPI) {
     if (view !== undefined) {
       try { flush(); } catch (error) { ctx.abort(); fault = errorText(error); ctx.ui.notify(fault, 'error'); }
     }
-    if (bounded !== event.message) return { message: bounded };
-  });
+    if (bounded !== original) return { message: bounded };
+  }
   pi.on('context_with_system', async (event, ctx) => {
     if (rpcWindow) return { messages: rpcWindow.context(event.messages) };
     try {
@@ -543,6 +567,7 @@ export default function optchat(pi: ExtensionAPI) {
       // A prompt without our preamble keeps the last one we built.
       const current = ctx.getSystemPrompt();
       if (current.startsWith(MASTER.slice(0, 40))) prompt = current;
+      await admitMissed(event.messages, ctx);
       // A turn past its budget moves its steps into the view, keeping the task and the last tool call whole (#146).
       const refresh = refreshPoint(run, keep, refreshBudget(ctx.model?.contextWindow, refreshFraction(a.config.refreshAt)));
       if (refresh) {
