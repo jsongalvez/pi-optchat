@@ -1029,11 +1029,14 @@ test('a task may name its own model and thinking level, kept when tell resumes i
   const children = await quickChildren(dir, undefined, asked);
   try {
     // The profile's choice is optchat-test/child at minimal, which that model can't take: it runs with thinking off.
-    const [plain, deep, model] = await children.spawn([{ task: 'plain' }, { task: 'deep', model: 'optchat-test/deep', thinking: 'high' }, { task: 'model only', model: 'optchat-test/deep' }], dir);
+    const [plain, deep, model] = await children.spawn([{ task: 'plain' }, { task: 'deep', model: 'optchat-test/deep', thinking: 'high' }, { task: 'same model', model: 'optchat-test/child', thinking: 'minimal' }], dir);
+    // A task naming another model without a level is refused whole: the profile's level belongs to the profile's model.
+    await assert.rejects(children.spawn([{ task: 'fine' }, { task: 'model only', model: 'optchat-test/deep' }], dir),
+      /Task names model optchat-test\/deep but no thinking level; the profile's level \(minimal\) is for optchat-test\/child only\./);
     await until(() => !children.active);
     const runs = [plain, deep, model].map(id => children.history.records.get(id)!);
-    assert.deepEqual(runs.map(run => `${run.model} ${run.thinking}`), ['optchat-test/child off', 'optchat-test/deep high', 'optchat-test/deep minimal']);
-    assert.deepEqual(asked.toSorted(), ['child off', 'deep high', 'deep minimal']);
+    assert.deepEqual(runs.map(run => `${run.model} ${run.thinking}`), ['optchat-test/child off', 'optchat-test/deep high', 'optchat-test/child off']);
+    assert.deepEqual(asked.toSorted(), ['child off', 'child off', 'deep high']);
     await children.tell(deep, 'Once more.');
     await until(() => !children.active);
     assert.equal(asked.at(-1), 'deep high', 'the resumed child keeps its own model and level');
@@ -1074,7 +1077,7 @@ test('on Anthropic, siblings on the first one\'s model hold their first request 
     () => ({ provider: 'optchat-test', model: 'child', thinking: 'off' }), () => '', async () => {}, () => {}, join(dir, 'profile'),
     { createSession: options => createAgentSession({ ...options, modelRuntime: runtime }) });
   try {
-    const [, , third] = await children.spawn([{ task: 'first' }, { task: 'second' }, { task: 'third' }, { task: 'own model', model: 'optchat-test/other' }], dir);
+    const [, , third] = await children.spawn([{ task: 'first' }, { task: 'second' }, { task: 'third' }, { task: 'own model', model: 'optchat-test/other', thinking: 'off' }], dir);
     await until(() => asked.length >= 2);
     await new Promise(r => setTimeout(r, 100));
     assert.deepEqual(asked.toSorted(), ['first', 'own model'], 'a sibling on another model sends a different prefix and starts at once');

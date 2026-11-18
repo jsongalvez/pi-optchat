@@ -82,7 +82,7 @@ const CWD_DOC = 'Project directory the subagent works in (~ allowed); its AGENTS
 /** The spawn tools' tasks. What a task leaves out of model, thinking and memory is the profile's subagent choice. */
 export const TASKS = Type.Array(Type.Object({ task: Type.String(), title: Type.Optional(Type.String({ description: TITLE_DOC })), cwd: Type.Optional(Type.String({ description: CWD_DOC })),
   model: Type.Optional(Type.String({ description: 'Leave unset for the profile\'s subagent model (named in your instructions). Set only when the user asks for a model, as provider/id from models().' })),
-  thinking: Type.Optional(StringEnum(THINKING, { description: 'Leave unset for the profile\'s subagent level. Set only when the user asks for one.' })),
+  thinking: Type.Optional(StringEnum(THINKING, { description: 'Leave unset for the profile\'s subagent level. Set when the user asks for one, and always when the task names a model other than the profile\'s: the profile\'s level is for its own model only.' })),
   memory: Type.Optional(StringEnum(['view', 'none'], { description: 'Leave unset for the profile\'s default for subagents (your instructions name it). \'none\' starts the child with its task alone: no view, no zoom/date. \'view\' asks for the view when the profile sets none.' })),
   context: Type.Optional(StringEnum(['files', 'none'], { description: 'Leave unset to start the child with the context files every session loads: the host AGENTS.md and the project\'s own. \'none\' starts it with no context files at all, so it reads only its task and its instructions: that is how a blind run or an independent judge is started, and its own children stay without them too.' })) }), { minItems: 1 });
 export type Task = Static<typeof TASKS>[number];
@@ -261,6 +261,9 @@ export class Children {
       const name = task.model ?? `${profile.provider}/${profile.model}`, model = this.find(name);
       // Like Pi's own setModel: a named model needs auth, so a guess at a provider the user isn't logged in to fails here, not in the child.
       if (!model || task.model && !this.registry.hasConfiguredAuth(model)) throw new Error(`Subagent model unavailable: ${name}. Models you can use: ${this.registry.getAvailable().map(m => `${m.provider}/${m.id}`).join(', ') || 'none'}.`);
+      // The profile's thinking level was chosen for the profile's model: a task naming another model states its own level,
+      // so a level picked for a cheap model never silently rides along to an expensive one.
+      if (task.model && name !== `${profile.provider}/${profile.model}` && !task.thinking) throw new Error(`Task names model ${name} but no thinking level; the profile's level (${profile.thinking}) is for ${profile.provider}/${profile.model} only. Set thinking for ${name}.`);
       // Memory: a parent without the view wins, then the task's own choice (the schema allows only 'view' and 'none'), then the
       // profile setting; nothing naming one is the view.
       const memory: EffectiveMemory = parentViewless ? { memory: 'none', memoryFrom: 'inherited' }
