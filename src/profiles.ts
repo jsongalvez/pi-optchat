@@ -115,21 +115,28 @@ export function patchConfigFile(dir: string, patch: ConfigPatch) {
   return config;
 }
 export function readInstructions(dir: string) { return readFileSync(join(dir, 'AGENTS.md'), 'utf8'); }
-/** The lead's own file, beside the profile's `AGENTS.md`: duties only this profile's main agent reads. Missing is not an
- * error (an older or a fresh profile has none): the lead's turn must run, and it simply carries no lead layer. */
-export function readLead(dir: string) {
-  try { return readFileSync(join(dir, 'LEAD.md'), 'utf8'); } catch { return ''; }
-}
 /** The project directory a profile's `project` names, `~` expanded as a task's `cwd` is. */
 const projectDirectory = (project: string) => resolve(project.replace(/^~(?=$|[\\/])/, homedir()));
-/** What the MAIN agent's `sections.instructions` carries, in this order: the profile's `AGENTS.md`, then its `LEAD.md`,
- * then the `AGENTS.md` of the `project` repo it works on. Subagents take `readInstructions(dir)` alone (`agents.ts`), so
- * a lead file never reaches one; both parts are read every turn, so a save applies from the next one. */
-export function leadInstructions(dir: string, project?: string) {
-  let projectRules = '';
-  if (project) { try { projectRules = readFileSync(join(projectDirectory(project), 'AGENTS.md'), 'utf8'); } catch { projectRules = ''; } }
-  return [readInstructions(dir), readLead(dir), projectRules].filter(text => text.trim()).join('\n\n');
+/** One part of an agent's prompt and where it came from: a file path, or `built-in: NAME` for OptChat's own text. */
+export type PromptBlock = { source: string; text: string };
+const identity = (path: string) => { try { return realpathSync.native(path); } catch { return resolve(path); } };
+/** The profile's rules, the same for the lead and every subagent: the profile's `AGENTS.md`, then the `AGENTS.md` of the
+ * `project` repo it works on. `loaded` are the context files Pi already put in this agent's prompt (its cwd's `AGENTS.md`
+ * and their parents'): a file among them is left out, so an agent working in the project repo reads it once. Read on
+ * every call, so a save applies from the next turn or spawn. A missing project file is no error: it adds nothing. */
+export function profileRules(dir: string, project?: string, loaded: string[] = []): PromptBlock[] {
+  const seen = new Set(loaded.map(identity)), blocks: PromptBlock[] = [];
+  const add = (source: string, read: () => string) => {
+    if (seen.has(identity(source))) return;
+    seen.add(identity(source));
+    const text = read();
+    if (text.trim()) blocks.push({ source, text });
+  };
+  add(join(dir, 'AGENTS.md'), () => readInstructions(dir));
+  if (project) { const path = join(projectDirectory(project), 'AGENTS.md'); add(path, () => { try { return readFileSync(path, 'utf8'); } catch { return ''; } }); }
+  return blocks;
 }
+export const joinBlocks = (blocks: PromptBlock[]) => blocks.map(block => block.text).join('\n\n');
 /** The profile's instructions, read again each turn, so a save applies from the next one. */
 export function saveInstructions(dir: string, text: string) { atomicWrite(join(dir, 'AGENTS.md'), text); }
 export function lastProfile() {

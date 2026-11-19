@@ -7,6 +7,7 @@ import { createAssistantMessageEventStream, type AssistantMessage, type Context 
 import { createAgentSession, ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { Children } from '../src/agents.ts';
 import { Memory } from '../src/memory.ts';
+import { profileRules, type PromptBlock } from '../src/profiles.ts';
 import { readRun } from '../src/run-record.ts';
 import type { Settings } from '../src/settings.ts';
 import { emptyUsage } from '../src/usage.ts';
@@ -33,7 +34,8 @@ function project(dir: string) {
   return path;
 }
 
-async function setup(dir: string, hold = new Set<string>(), settings: () => Partial<Settings> = () => ({})) {
+async function setup(dir: string, hold = new Set<string>(), settings: () => Partial<Settings> = () => ({}),
+  rules: (loaded: string[]) => string | PromptBlock[] = () => 'USER INSTRUCTIONS') {
   const requests: Request[] = [], releases: (() => void)[] = [];
   const runtime = await ModelRuntime.create({ authPath: join(dir, 'auth.json'), modelsPath: null, modelsStorePath: join(dir, 'models-cache.json'), refreshOnCreate: false });
   runtime.registerProvider('optchat-test', {
@@ -57,7 +59,7 @@ async function setup(dir: string, hold = new Set<string>(), settings: () => Part
     },
   });
   const memory = new Memory(join(dir, 'profile'), async input => input.source.slice(0, 100), () => {});
-  const make = () => new Children(memory, new ModelRegistry(runtime), () => ({ provider: 'optchat-test', model: 'child', thinking: 'off' }), () => 'USER INSTRUCTIONS', async () => {}, () => {},
+  const make = () => new Children(memory, new ModelRegistry(runtime), () => ({ provider: 'optchat-test', model: 'child', thinking: 'off' }), rules, async () => {}, () => {},
     join(dir, 'profile'), { settings: () => ({ subagentLevels: 2, maxAgents: 8, ...settings() }), createSession: options => createAgentSession({ ...options, modelRuntime: runtime }) });
   return { requests, release: () => { for (const r of releases.splice(0)) r(); }, make };
 }
@@ -73,7 +75,7 @@ test("context 'none': the child loads no context files, the plain child loads th
     const sighted = requests.find(r => r.task === 'spawn-plain')!, dark = requests.find(r => r.task === 'spawn-blind')!;
     assert.ok(sighted.system.includes(PROJECT_MARKER), 'a child with no context choice reads its project AGENTS.md');
     assert.ok(!dark.system.includes(PROJECT_MARKER) && !dark.payload.includes(PROJECT_MARKER), "context: 'none' keeps every context file out");
-    assert.ok(dark.system.includes('USER INSTRUCTIONS'), 'the profile instructions still reach it');
+    assert.ok(sighted.system.includes('USER INSTRUCTIONS') && !dark.system.includes('USER INSTRUCTIONS'), 'the profile rules reach only the sighted child');
     assert.deepEqual([record(children, blind)?.context, record(children, blind)?.contextFrom], ['none', 'task'], 'the record says the task did it');
     assert.deepEqual([record(children, plain)?.context, record(children, plain)?.contextFrom], ['files', 'default']);
     assert.deepEqual([readRun(join(dir, 'profile'), blind).context, readRun(join(dir, 'profile'), blind).contextFrom], ['none', 'task'], 'saved with the run');
@@ -130,4 +132,54 @@ test("a blind parent's children stay without the context files, whatever their t
     release();
     await until(() => !children.active);
   } finally { release(); await children.close(); removeDir(dir); }
+});
+
+// The spawn contract for the profile's rules: what the lead reads (the profile's AGENTS.md and its project repo's), every
+// subagent reads too, once, and a blind one reads none of it.
+const PROFILE_MARKER = 'PROFILE-MARKER research on Opus, grunt work on the default';
+const count = (text: string, marker: string) => text.split(marker).length - 1;
+async function profileSetup(dir: string) {
+  const profileDir = join(dir, 'profile'), repo = join(dir, 'literary-mt'), tries = join(dir, 'tries');
+  for (const path of [profileDir, repo, tries]) mkdirSync(path, { recursive: true });
+  writeFileSync(join(profileDir, 'AGENTS.md'), `# Profile\n\n${PROFILE_MARKER}\n`);
+  writeFileSync(join(repo, 'AGENTS.md'), `# Project rules\n\n${PROJECT_MARKER}\n`);
+  return { repo, tries, ...await setup(dir, undefined, undefined, loaded => profileRules(profileDir, repo, loaded)) };
+}
+
+test('a subagent outside the project repo reads the profile AGENTS.md and the project AGENTS.md, once each', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-rules-tries-'));
+  const { tries, requests, make } = await profileSetup(dir);
+  const children = make();
+  try {
+    await children.spawn([{ task: 'in-tries', cwd: tries }], tries);
+    await until(() => !children.active);
+    const { system } = requests.find(r => r.task === 'in-tries')!;
+    assert.deepEqual([count(system, PROFILE_MARKER), count(system, PROJECT_MARKER)], [1, 1]);
+  } finally { await children.close(); removeDir(dir); }
+});
+
+test('a subagent in the project repo reads its AGENTS.md exactly once', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-rules-repo-'));
+  const { repo, requests, make } = await profileSetup(dir);
+  const children = make();
+  try {
+    await children.spawn([{ task: 'in-repo', cwd: repo }], repo);
+    await until(() => !children.active);
+    const { system } = requests.find(r => r.task === 'in-repo')!;
+    assert.deepEqual([count(system, PROFILE_MARKER), count(system, PROJECT_MARKER)], [1, 1], 'the context file, not a second copy from the profile rules');
+  } finally { await children.close(); removeDir(dir); }
+});
+
+test("context 'none' gets neither the profile's AGENTS.md nor its project's", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'optchat-rules-blind-'));
+  const { tries, repo, requests, make } = await profileSetup(dir);
+  const children = make();
+  try {
+    await children.spawn([{ task: 'blind-tries', cwd: tries, context: 'none' }, { task: 'blind-repo', cwd: repo, context: 'none' }], tries);
+    await until(() => !children.active);
+    for (const task of ['blind-tries', 'blind-repo']) {
+      const { system, payload } = requests.find(r => r.task === task)!;
+      assert.ok(![PROFILE_MARKER, PROJECT_MARKER].some(marker => system.includes(marker) || payload.includes(marker)), task);
+    }
+  } finally { await children.close(); removeDir(dir); }
 });

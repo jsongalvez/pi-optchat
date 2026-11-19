@@ -6,13 +6,13 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import * as sdk from '@earendil-works/pi-coding-agent';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { StringEnum, type Api, type Model } from '@earendil-works/pi-ai';
-import { allowSearch, SEARCH_DOC, VIEW_DOC } from './core/prompts.ts';
-import { windowHandoff, CONNECTED, cutOffChildren, stillRunning, delegation, NO_DELEGATION, NOT_CONNECTED, RESTARTED, STEERABLE, SUBAGENT, SUBAGENT_NO_VIEW } from './prompts.ts';
+import { windowHandoff, cutOffChildren, stillRunning, RESTARTED } from './prompts.ts';
+import { promptSections, subagentPrompt } from './system-text.ts';
 import { memoryTools } from './tools.ts';
 import { searchTool } from './core/tools.ts';
 import { VIEW } from './core/memory.ts';
 import type { Memory } from './memory.ts';
-import type { ModelChoice } from './profiles.ts';
+import type { ModelChoice, PromptBlock } from './profiles.ts';
 import { cachePayload } from './core/cache.ts';
 import { childInput } from './core/messages.ts';
 import { alive, runMessages, runsElsewhere, CUT_OFF, reportHead, RunHistory, isActiveRun, isRunning, transition, sessionMessages, savedSession, undelivered, sentText, queuedWindows, unqueueWindow, type ContextFrom, type Guidance, type MemoryFrom, type RemoteWindow, type RunInfo, type RunState, type FinishReason } from './runs.ts';
@@ -87,7 +87,7 @@ export const TASKS = Type.Array(Type.Object({ task: Type.String(), title: Type.O
   model: Type.Optional(Type.String({ description: 'Leave unset for the profile\'s subagent model (named in your instructions). Set only when the user asks for a model, as provider/id from models().' })),
   thinking: Type.Optional(StringEnum(THINKING, { description: 'Leave unset for the profile\'s subagent level. Set when the user asks for one, and always when the task names a model other than the profile\'s: the profile\'s level is for its own model only.' })),
   memory: Type.Optional(StringEnum(['view', 'none'], { description: 'Leave unset for the profile\'s default for subagents (your instructions name it). \'none\' starts the child with its task alone: no view, no zoom/date. \'view\' asks for the view when the profile sets none.' })),
-  context: Type.Optional(StringEnum(['files', 'none'], { description: 'Leave unset to start the child with the context files every session loads: the host AGENTS.md and the project\'s own. \'none\' starts it with no context files at all, so it reads only its task and its instructions: that is how a blind run or an independent judge is started, and its own children stay without them too.' })) }), { minItems: 1 });
+  context: Type.Optional(StringEnum(['files', 'none'], { description: 'Leave unset to start the child with the context files every session loads: the host AGENTS.md and the project\'s own. \'none\' starts it with no context files and no profile rules, so it reads only its task and OptChat\'s own text: that is how a blind run or an independent judge is started, and its own children stay without them too.' })) }), { minItems: 1 });
 export type Task = Static<typeof TASKS>[number];
 /** What a task's `memory` comes out as, and why: the four rows of the precedence (see `launch`). */
 type EffectiveMemory = { memory: 'view' | 'none'; memoryFrom: MemoryFrom };
@@ -160,7 +160,7 @@ export class Children {
   /** Commands the agents started with the background tool; a subagent with one still running waits for its report. */
   readonly background: Background;
   constructor(private readonly memory: Memory, private readonly registry: ModelRegistry,
-    private readonly choice: () => ModelChoice, private readonly instructions: () => string,
+    private readonly choice: () => ModelChoice, private readonly instructions: (loaded: string[]) => string | PromptBlock[],
     private readonly report: (text: string, options?: { once?: boolean; count?: number }) => Promise<void>, private readonly warn: (text: string) => void,
     private readonly profileDirectory = memory.directory, private readonly options: Options = {}) {
     this.history = new RunHistory(profileDirectory);
@@ -370,11 +370,12 @@ export class Children {
         // Same prompt as the main agent (AGENTS.md files, skills, cwd); only the OptChat preamble differs.
         // Read every run, so edits reach a live child's next run (after a pause, or a connected window's next message); Pi sends only the changed sections.
         pi.on('before_agent_start', event => {
-          // Without the view, the preamble says the first message is the task alone, and nothing describes the view, zoom or search.
-          event.systemPromptOptions.customPrompt = viewless ? SUBAGENT_NO_VIEW : allowSearch(`${SUBAGENT}\n\n${VIEW_DOC}${memorySearch ? SEARCH_DOC : ''}`, memorySearch);
           // What this agent's own children get by default, read as the other settings are; nothing to tell it when it has no view to pass on.
           const childrenMemory = viewless ? undefined : this.settings.subagentMemory ? 'view' as const : 'none' as const;
-          event.systemPromptOptions.sections.instructions = [this.instructions(), delegates ? delegation(maxAgents, this.choice(), childrenMemory) : NO_DELEGATION, STEERABLE, connected ? CONNECTED : NOT_CONNECTED].filter(Boolean).join('\n\n');
+          const prompt = subagentPrompt({ viewless, memorySearch, delegates, maxAgents, choice: this.choice(), childrenMemory, connected, context: o.context },
+            () => this.rules(event.systemPromptOptions.contextFiles.map(file => file.path)));
+          const { customPrompt, instructions } = promptSections(prompt);
+          event.systemPromptOptions.customPrompt = customPrompt; event.systemPromptOptions.sections.instructions = instructions;
           refreshContextFiles(event.systemPromptOptions);
         });
         pi.on('before_provider_request', async (event, ctx) => {
@@ -397,6 +398,11 @@ export class Children {
     try { await session.bindExtensions({}); }
     catch (error) { await this.shutdown(session); this.dispose(session); throw error; }
     return session;
+  }
+  /** The profile's rules for a child whose prompt already holds the context files `loaded`; a plain string is one unnamed block. */
+  private rules(loaded: string[]): PromptBlock[] {
+    const rules = this.instructions(loaded);
+    return typeof rules !== 'string' ? rules : rules.trim() ? [{ source: 'profile instructions', text: rules }] : [];
   }
   private delegationTools(parentId: string, cwd: string, levels: number, maxAgents: number) {
     return [{ name: 'spawn', label: 'Delegate task', description: `Delegate parts of your task. Results arrive automatically after this run; never poll or sleep waiting. models() lists the ids a task's model may name. Maximum depth ${levels} and ${maxAgents} active agents per profile.`,

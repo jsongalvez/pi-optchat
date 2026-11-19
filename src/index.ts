@@ -9,9 +9,10 @@ import { Type } from 'typebox';
 import { Memory } from './memory.ts';
 import { atomicWrite, storeFor } from './store.ts';
 import { createCompressor } from './compactor.ts';
-import { applyConfig, createProfile, describeOwner, holdProfile, isWindows, lastProfile, leadInstructions, listProfiles, loadConfig, memoryDirectory, profilePath, readInstructions, type ModelChoice, rememberProfile, saveInstructions, ProfileBusyError, type ConfigPatch, type ProfileConfig } from './profiles.ts';
-import { allowSearch, CONTINUITY, IMPORT_GUIDANCE, SEARCH_DOC, TURN_REFRESHED, VIEW_DOC } from './core/prompts.ts';
-import { MASTER, memoryHint, modelsHint } from './prompts.ts';
+import { applyConfig, createProfile, describeOwner, holdProfile, isWindows, lastProfile, listProfiles, loadConfig, memoryDirectory, profilePath, profileRules, readInstructions, type ModelChoice, rememberProfile, saveInstructions, ProfileBusyError, type ConfigPatch, type ProfileConfig } from './profiles.ts';
+import { TURN_REFRESHED } from './core/prompts.ts';
+import { MASTER } from './prompts.ts';
+import { leadPrompt, promptSections } from './system-text.ts';
 import { cachePayload, record } from './core/cache.ts';
 import { saveImages } from './images.ts';
 import { asUser, atWork, buildContext, logMessage, previousExchange, refreshFraction, reportReceipt, REPORT_RECEIPT, REPORT_TYPE, RUN_BOUNDARY, textContent, typedText } from './transcript.ts';
@@ -286,7 +287,7 @@ export default function optchat(pi: ExtensionAPI) {
       const inbox = new Inbox(dir);
       const recovered = pendingImport(dir) ? 0 : inbox.recover(memory);
       if (recovered) ctx.ui.notify(`Recovered ${recovered} unanswered inputs into ${name}'s memory. Ask to continue them when ready.`, 'info');
-      const children = new Children(memory, ctx.modelRegistry, () => config.subagent, () => `${readInstructions(dir)}\n\n${IMPORT_GUIDANCE}`,
+      const children = new Children(memory, ctx.modelRegistry, () => config.subagent, loaded => profileRules(dir, config.project, loaded),
         deliverReport, text => ctx.ui.notify(text, 'error'), dir, { parentSession: sessionId, usage, builtins: () => loadedBuiltins(pi), settings: () => config, hold: holdReports,
           summarizeHandoff: createHandoffSummarizer(ctx.modelRegistry, () => config.compactor, message => usage.compression(message, 'compactor', sessionId)) });
       const loggedReports = new Set(memory.root.map(e => e.receipt));
@@ -480,8 +481,8 @@ export default function optchat(pi: ExtensionAPI) {
     pi.appendEntry(RUN_BOUNDARY, { state: 'start' });
     // Pi's own prompt sections (AGENTS.md files, skills, cwd) stay; the profile's instructions go last.
     syncSearch(a.config);
-    event.systemPromptOptions.customPrompt = allowSearch(`${MASTER}\n\n${modelsHint(a.config.subagent)}\n\n${memoryHint(a.config.subagentMemory ? 'view' : 'none')}\n\n${VIEW_DOC}${a.config.previousExchange ? CONTINUITY : ''}${a.config.memorySearch ? SEARCH_DOC : ''}`, a.config.memorySearch);
-    event.systemPromptOptions.sections.instructions = `${leadInstructions(a.dir, a.config.project)}\n\n${IMPORT_GUIDANCE}`;
+    const { customPrompt, instructions } = promptSections(leadPrompt(a.dir, a.config, event.systemPromptOptions.contextFiles.map(file => file.path)));
+    event.systemPromptOptions.customPrompt = customPrompt; event.systemPromptOptions.sections.instructions = instructions;
     refreshContextFiles(event.systemPromptOptions);
     prompt = event.systemPrompt;
   });

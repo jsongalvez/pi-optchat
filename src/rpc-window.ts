@@ -4,9 +4,9 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { readMemory, type Memory } from './memory.ts';
 import { fingerprint } from './store.ts';
-import { loadConfig, memoryDirectory, profilePath, readInstructions } from './profiles.ts';
-import { allowSearch, IMPORT_GUIDANCE, SEARCH_DOC, VIEW_DOC } from './core/prompts.ts';
-import { WINDOW, WINDOW_STEERABLE, windowHandoff } from './prompts.ts';
+import { loadConfig, memoryDirectory, profilePath } from './profiles.ts';
+import { windowHandoff } from './prompts.ts';
+import { promptSections, windowPrompt } from './system-text.ts';
 import { placeView } from './core/messages.ts';
 import { connectWindow } from './window-client.ts';
 import { HANDOFF_TIMEOUT, handoffText } from './handoff.ts';
@@ -145,8 +145,8 @@ export async function openRemoteWindow(pi: ExtensionAPI, ctx: ExtensionContext, 
         if (fresh !== view || anchor === undefined) { view = fresh; anchoring = true; }
       }
       syncTools(config.memorySearch);
-      event.systemPromptOptions.customPrompt = allowSearch(`${WINDOW}\n\n${VIEW_DOC}${config.memorySearch ? SEARCH_DOC : ''}`, config.memorySearch);
-      event.systemPromptOptions.sections.instructions = [readInstructions(dir), IMPORT_GUIDANCE, WINDOW_STEERABLE].join('\n\n');
+      const { customPrompt, instructions } = promptSections(windowPrompt(dir, config, event.systemPromptOptions.contextFiles.map(file => file.path)));
+      event.systemPromptOptions.customPrompt = customPrompt; event.systemPromptOptions.sections.instructions = instructions;
       await register();
     },
     /** Pi's messages with the view put in front of the request it was read for. */
