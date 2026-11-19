@@ -29,7 +29,8 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "test": "tsx --import ./test/support.ts --test test/*.test.ts",
-    "test:live": "tsx test/live.ts"
+    "test:live": "tsx test/live.ts",
+    "loads": "tsx scripts/loads.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261031.1",
