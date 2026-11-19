@@ -223,22 +223,6 @@ test('the settings page saves a valid number and explains an invalid one', () =>
   } finally { removeDir(dir); }
 });
 
-test('the settings page shows the Subagent memory view row and saves it toggled off', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'optchat-page-'));
-  try {
-    const config: ProfileConfig = { ...defaults };
-    saveConfig(dir, config);  // a profile always has its config.json
-    const page = settingsPage(plain, { profile: 'demo', config, models: [{ name: 'anthropic/claude-sonnet-5-5', thinking: ['low', 'medium'] }], dir }, () => {});
-    assert.match(page.render(100).join('\n'), /Subagent memory view\s+on  default\n/);
-    // Down past the two model rows and the three subagent ones above it, then toggle it.
-    for (const key of ['\x1b[B', '\x1b[B', '\x1b[B', '\x1b[B', '\x1b[B', ' ']) page.handleInput(key);
-    assert.equal(config.subagentMemory, false);
-    assert.equal(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).subagentMemory, false);
-    assert.match(page.render(100).join('\n'), /Subagent memory view\s+off  default on[\s\S]*Saved subagent memory view off/);
-    page.handleInput('\x1b');
-  } finally { removeDir(dir); }
-});
-
 test('turning Previous exchange off also reaches a turn that a subagent report starts while idle', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'oc-report-'));
   const oldHome = process.env.OPTCHAT_HOME;

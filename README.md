@@ -272,9 +272,9 @@ OptChat keeps the recipe's numbers: 512-byte lines, binary merges, the 128,000 â
 
 ## Fork changes
 
-This fork (jsongalvez/pi-optchat) runs one owner's long-lived agent setup on top of upstream (jonaslsaa/pi-optchat). Branch `local` holds everything; `spawn-memory-none` is the branch behind upstream PR #309.
+This fork (jsongalvez/pi-optchat) runs one owner's long-lived agent setup on top of upstream (jonaslsaa/pi-optchat). Branch `local` holds everything.
 
-- Sent upstream: PR #309 (spawn without the memory view, and a per-profile default for it).
+- Sent upstream: PR #309 (spawn without the memory view, and a per-profile default for it); closed unmerged 2026-11-20, kept here.
 - Fork only: 1-hour prompt cache per profile, lead-only instructions and blind spawns, extension settle-boundary fix, settings save keeps config keys, named model needs a thinking level, background tool and its prompt, subagents load profile and project rules, model hint per job, `npm run loads`.
 
 The list of commits is git itself, not a copy here:
