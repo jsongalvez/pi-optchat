@@ -2,8 +2,8 @@ import { getMarkdownTheme, type ExtensionAPI, type Theme } from '@earendil-works
 import { Box, Markdown, Text } from '@earendil-works/pi-tui';
 import { REPORT_TYPE, textContent, withoutFullChat } from './transcript.ts';
 
-/** `[id]` or `[id · title]` (runs.ts `reportHead`); titles hold no brackets. */
-const HEAD = /^\[([0-9a-f]{8})(?: · ([^\]\n]*))?\] (?:(Message from subagent \(still running\)|Connected agent message): )?/;
+/** `[id]` or `[id · title]` (runs.ts `reportHead`), or a background command's `[bg-id]`; titles hold no brackets. */
+const HEAD = /^\[((?:bg-)?[0-9a-f]{8})(?: · ([^\]\n]*))?\] (?:(Message from subagent \(still running\)|Connected agent message): )?/;
 
 /** Sent with a report: `count` subagent reports joined in one message, when one spawn's reports arrive together. */
 export interface ReportDetails { count?: number }
@@ -16,6 +16,8 @@ export function reportParts(text: string, count = 1) {
   if (!match) return { label: 'subagent', body: text };
   const [, id, title, message] = match;
   const kind = message === undefined ? 'report' : message.startsWith('Message') ? 'still running' : 'connected window';
+  // A background command's exit report (background.ts): `[bg-<id>] <label> exited <code> after ...`.
+  if (id.startsWith('bg-')) return { label: `background ${id} · exit report`, body: text.slice(match[0].length) };
   return { label: `subagent ${id}${title ? ` · ${title}` : ''} · ${kind}`, body: text.slice(match[0].length) };
 }
 

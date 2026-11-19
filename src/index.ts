@@ -20,6 +20,7 @@ import { registerReportRenderer, type ReportDetails } from './report-message.ts'
 import { memoryTools } from './tools.ts';
 import { result, searchTool } from './core/tools.ts';
 import { Children, loadedBuiltins, modelsTool, refreshContextFiles, TASKS } from './agents.ts';
+import { backgroundTool } from './background.ts';
 import { isActiveRun, type RunInfo } from './runs.ts';
 import { exportBrowser } from './browser.ts';
 import { Inbox } from './inbox.ts';
@@ -303,11 +304,15 @@ export default function optchat(pi: ExtensionAPI) {
       status(ctx);
       ctx.ui.notify(`${brand} · ${name} · ${memory.root.length} messages\nCompactor: ${config.compactor.provider}/${config.compactor.model} (${config.compactor.thinking})`, 'info');
       const queuedReports = [...reports];
+      let resumed: Promise<void> = Promise.resolve();
       if (!pendingImport(dir)) {
         const recover = (work: Promise<void>, what: string) => work.catch(error => ctx.ui.notify(`${what}: ${errorText(error)}`, 'error'));
         // Only an interactive Pi picks cut-off subagents up: a one-shot headless run would stop them again as it exits.
-        recovery = Promise.all([recover(children.recoverHandoffs(), 'Handoff recovery'), ...ctx.mode === 'tui' ? [recover(children.resumeCutOff(), 'Resuming subagents')] : []]).then(() => {});
+        if (ctx.mode === 'tui') resumed = recover(children.resumeCutOff(), 'Resuming subagents');
+        recovery = Promise.all([recover(children.recoverHandoffs(), 'Handoff recovery'), resumed]).then(() => {});
       }
+      // Background commands an earlier Pi started report once the subagents that own them are back, so their reports reach them.
+      void resumed.then(() => { if (active?.children === children) children.background.watch(); });
       setImmediate(() => { if (active?.memory === memory && !pendingImport(dir)) for (const r of queuedReports) sendReport(r); });
     } catch (error) {
       await closeWindows?.(); closeWindows = undefined;
@@ -633,6 +638,7 @@ export default function optchat(pi: ExtensionAPI) {
     },
   });
   pi.registerTool(modelsTool(() => required().children));
+  pi.registerTool({ ...backgroundTool(() => ''), async execute(_id, args, _signal, _update, ctx) { return result(required().children.startBackground(args, ctx.cwd)); } });
   pi.registerTool({ name: 'tell', label: 'Tell background agent', description: 'Send a message to a subagent. A running one gets it at its next tool boundary. A finished one you started is resumed with its earlier conversation, and its new report arrives automatically.',
     parameters: Type.Object({ id: Type.String(), message: Type.String() }),
     async execute(_id, args) { return result(await required().children.tell(args.id, args.message)); },

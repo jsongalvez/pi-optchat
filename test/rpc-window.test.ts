@@ -95,6 +95,7 @@ test('an RPC session on a busy profile joins as a connected window: its own agen
     assert.match(request.system, /You are a connected window of OptChat/);
     assert.match(request.messages.join('\n'), /The colour is teal\./, 'the view, read from disk, comes with the request');
     assert.ok(!window.sent.some(s => s.system.includes('"spawn"')) && !window.session.getActiveToolNames().includes('spawn'), 'a window delegates nothing');
+    assert.ok(!window.session.getActiveToolNames().includes('background'), 'a window starts no background command');
     assert.ok(window.session.getActiveToolNames().includes('zoom'));
     // The owner's agent is told about the window (a turn that changes the view), and summarizes that long report.
     await until(() => owner.sent.some(s => s.last.includes('User started a connected conversation')) && !owner.session.isStreaming);

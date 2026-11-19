@@ -86,6 +86,8 @@ export const NOT_CONNECTED = 'Use tell_parent only when your parent needs someth
 
 // The message a subagent is resumed with after a Pi restart cut it off.
 export const RESTARTED = 'Pi restarted while you were working. Your last tool call may have been cut off; check its effect before redoing it. Continue your task.';
+/** Added to a resume message when background commands the resumed agent started are still running: it waits for their reports. */
+export const stillRunning = (text: string, ids: string[]) => ids.length ? `${text}\n\nYour background command${ids.length > 1 ? 's' : ''} ${ids.join(', ')} ${ids.length > 1 ? 'are' : 'is'} still running; ${ids.length > 1 ? 'their exit reports' : 'its exit report'} will arrive as a message. Don't poll or sleep for ${ids.length > 1 ? 'them' : 'it'}.` : text;
 /** Added to a resume message when the resumed agent's own children were cut off too. */
 export const cutOffChildren = (text: string, ids: string[]) => ids.length ? `${text}\n\nYour subagents ${ids.join(', ')} were cut off by a Pi restart: tell resumes one if you still need its result.` : text;
 

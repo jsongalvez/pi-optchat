@@ -20,8 +20,8 @@ import { textContent } from './transcript.ts';
 export const ROLE_STATUS = 'optchat.role';
 export type Role = { role: 'owner'; profile: string }
   | { role: 'window'; profile: string; id: string; connected: boolean; completed: boolean; after?: number };
-/** Tools that need the owner's agents: a window delegates nothing. */
-const OWNER_TOOLS = ['spawn', 'tell', 'models'];
+/** Tools that need the owner's agents: a window delegates nothing and starts no background command (its report would have no one to reach). */
+const OWNER_TOOLS = ['spawn', 'tell', 'models', 'background'];
 const RECONNECT_MS = 5000;
 /** The closing message that asks a window for its handoff (`windowHandoff`). */
 const HANDOFF_TYPE = 'optchat-handoff-request';

@@ -7,7 +7,7 @@ import * as sdk from '@earendil-works/pi-coding-agent';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { StringEnum, type Api, type Model } from '@earendil-works/pi-ai';
 import { allowSearch, SEARCH_DOC, VIEW_DOC } from './core/prompts.ts';
-import { windowHandoff, CONNECTED, cutOffChildren, delegation, NO_DELEGATION, NOT_CONNECTED, RESTARTED, STEERABLE, SUBAGENT, SUBAGENT_NO_VIEW } from './prompts.ts';
+import { windowHandoff, CONNECTED, cutOffChildren, stillRunning, delegation, NO_DELEGATION, NOT_CONNECTED, RESTARTED, STEERABLE, SUBAGENT, SUBAGENT_NO_VIEW } from './prompts.ts';
 import { memoryTools } from './tools.ts';
 import { searchTool } from './core/tools.ts';
 import { VIEW } from './core/memory.ts';
@@ -24,6 +24,7 @@ import { HANDOFF_TIMEOUT, handoffText, withUndelivered, type HandoffEvidence } f
 import { DEFAULT_SETTINGS, type Settings } from './settings.ts';
 import { THINKING } from './profiles.ts';
 import { oneLine } from './inspector.ts';
+import { Background, backgroundTool, STARTED, type Job } from './background.ts';
 
 export interface LiveRun {
   session: AgentSession; info: RunInfo; updated: number; streaming?: AgentMessage;
@@ -61,7 +62,9 @@ interface Options { parentSession?: string; usage?: UsageLedger; createSession?:
   /** The compactor's handoff, when the window can't write its own. */
   summarizeHandoff?: (run: RunInfo, messages: AgentMessage[], descendants?: HandoffEvidence[], signal?: AbortSignal) => Promise<string>;
   /** How long a window may take to write its handoff before the compactor writes it; 5 minutes by default. */
-  windowHandoffTimeout?: number }
+  windowHandoffTimeout?: number;
+  /** How often background commands an earlier Pi started are checked, in ms; 15 seconds by default. */
+  backgroundPoll?: number }
 
 // Subagents load the user's installed extensions, except any copy of OptChat itself: they get memory tools directly and must not open a profile.
 const packageName = (path: string): string | undefined => {
@@ -154,11 +157,14 @@ export class Children {
   private readonly completions = new Set<Promise<void>>();
   /** Aborted when Pi starts closing: see deferHandoffs(). */
   private readonly deferring = new AbortController();
+  /** Commands the agents started with the background tool; a subagent with one still running waits for its report. */
+  readonly background: Background;
   constructor(private readonly memory: Memory, private readonly registry: ModelRegistry,
     private readonly choice: () => ModelChoice, private readonly instructions: () => string,
     private readonly report: (text: string, options?: { once?: boolean; count?: number }) => Promise<void>, private readonly warn: (text: string) => void,
     private readonly profileDirectory = memory.directory, private readonly options: Options = {}) {
     this.history = new RunHistory(profileDirectory);
+    this.background = new Background(join(profileDirectory, 'runs', 'background'), (job, text) => this.deliverBackground(job, text), warn, options.backgroundPoll);
     for (const warning of this.history.warnings) warn(warning);
     for (const run of this.history.records.values()) {
       if (!run.sessionFile || !options.usage) continue;
@@ -383,7 +389,8 @@ export class Children {
     await loader.reload();
     const { session } = await (this.options.createSession ?? createAgentSession)({ cwd: directory, resourceLoader: loader, settingsManager,
       model: o.model, thinkingLevel: o.thinking, sessionManager: o.sessionManager,
-      customTools: [...viewless ? [] : [...memoryTools(() => this.memory, run => this.transcript(run, id)), ...(memorySearch ? [searchTool(() => this.memory)] : [])], ...(delegates ? [...this.delegationTools(id, directory, subagentLevels, maxAgents), modelsTool(() => this)] : []), this.parentTool(id, parentId, connected)],
+      customTools: [...viewless ? [] : [...memoryTools(() => this.memory, run => this.transcript(run, id)), ...(memorySearch ? [searchTool(() => this.memory)] : [])], ...(delegates ? [...this.delegationTools(id, directory, subagentLevels, maxAgents), modelsTool(() => this)] : []), this.parentTool(id, parentId, connected),
+        backgroundTool(args => this.startBackground(args, directory, id))],
       excludeTools: delegates ? [] : ['spawn', 'tell', 'models'],
     });
     // Callers track the session only after this returns: clean up here if its extensions fail to start.
@@ -415,6 +422,16 @@ export class Children {
         return result(parentId ? `Message sent to parent ${parentId}.` : 'Message sent to the main agent.');
       },
     };
+  }
+  /** The background tool's answer: `owner` is the subagent starting it, unset for the main agent. */
+  startBackground(args: { command: string; cwd?: string; title?: string }, cwd: string, owner?: string) {
+    if (this.closing) throw new Error('Profile is closing.');
+    return STARTED(this.background.start({ command: args.command, cwd: taskDirectory(cwd, args.cwd), title: args.title, owner }));
+  }
+  /** A background command's exit report goes where its owner's messages go; an owner no longer running hands it to the main agent. */
+  private async deliverBackground(job: Job, text: string) {
+    if (job.owner && await this.toParent(job.owner, text)) return;
+    await this.report(job.owner ? `${text}\n\n(Started by subagent ${job.owner}, which is no longer running.)` : text);
   }
   /** A mid-run message to a child's parent: false if that parent is no longer running. */
   private async toParent(parentId: string | undefined, text: string) {
@@ -478,7 +495,7 @@ export class Children {
         }
         const last = session.messages.findLast(m => m.role === 'assistant');
         // An error ends the turn, not the run: children still at work report to it and it answers them, as the main agent does.
-        if (!paused && last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted') && !live.pendingReports.length && !this.directChildren(info.id).length) break;
+        if (!paused && last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted') && !live.pendingReports.length && !this.directChildren(info.id).length && !this.background.pending(info.id).length) break;
         if (live.pendingGuidance.length) {
           transition(info, 'running'); this.save(info);
           live.prompting = live.pendingGuidance.shift()!;
@@ -491,7 +508,8 @@ export class Children {
           await session.prompt(live.pendingReports.splice(0).join('\n\n'));
           continue;
         }
-        const children = this.directChildren(info.id).flatMap(child => child.completion ? [child.completion] : []);
+        // Its children and its background commands: each one's end delivers a report, which the next pass prompts it with.
+        const children = [...this.directChildren(info.id).flatMap(child => child.completion ? [child.completion] : []), ...this.background.pending(info.id)];
         if (!children.length && !info.connected) break;
         const wake = new Promise<void>(resolve => { live.wake = resolve; });
         transition(info, 'waiting'); this.save(info);
@@ -692,7 +710,7 @@ export class Children {
       // The finished record stays untouched (and resumable) unless the new one is saved.
       const { ended: _ended, cutOff: _cutOff, ...rest } = run;
       const cut = [...this.history.records.values()].filter(r => r.parentId === id && r.cutOff).map(r => r.id);
-      const prompt = cutOffChildren(text, cut);
+      const prompt = stillRunning(cutOffChildren(text, cut), this.background.running.filter(job => job.owner === id).map(job => job.id));
       const guidance: Guidance = { text: prompt, date: Date.now(), state: 'queued', from };
       const info: RunInfo = { ...rest, state: 'running', started: Date.now(), parentSession: this.options.parentSession ?? run.parentSession, guidance: [...run.guidance, guidance] };
       try {
@@ -948,6 +966,7 @@ export class Children {
   deferHandoffs() { this.deferring.abort(); }
   async close() {
     this.closing = true; this.deferHandoffs();
+    this.background.close(); // Its commands keep running; the next start re-attaches to them.
     // Only work in progress is picked up at the next start: not paused runs waiting for the user, runs being stopped, or connected windows (they hand off).
     for (const { info } of this.running.values()) if (!info.connected && (info.state === 'running' || info.state === 'waiting')) info.cutOff = true;
     await Promise.allSettled([...this.running.keys()].map(id => this.stop(id, 'pi')));
