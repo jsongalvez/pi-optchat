@@ -51,6 +51,8 @@ const STOPPED: Record<StopCause, string> = {
   parent: 'Stopped because the agent that started it stopped or ended. Its chat is kept, so tell resumes it where it stopped.',
   pi: 'Stopped because Pi closed or reloaded while it waited for the user. It is not resumed on its own; its chat is kept, so tell resumes it where it stopped.',
 };
+/** A provider error (usage limit, 429, outage) ends the run, not its work: say how to pick it up, so the parent decides instead of forgetting it (retro 2026-11-18 C4). */
+const FAILED_RESUME = 'Its chat and files are kept, so tell resumes it where it stopped. After a usage or rate limit, resume once the limit resets or give the rest to another model; do not start the task over.';
 const stoppedReport = (cause: StopCause, text = '') => `${STOPPED[cause]}${text ? `\n\nIts last message before the stop:\n${text}` : ''}`;
 interface Options { parentSession?: string; usage?: UsageLedger; createSession?: typeof createAgentSession;
   /** Names of the built-in extensions the main session loaded (see `loadedBuiltins`). */
@@ -526,7 +528,7 @@ export class Children {
         : last?.role === 'assistant' && last.stopReason === 'error' ? 'failed' : 'completed');
       const text = session.getLastAssistantText();
       info.report = info.state === 'stopped' && live.stoppedBy ? stoppedReport(live.stoppedBy, text)
-        : last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted') ? `Task ${last.stopReason}: ${last.errorMessage ?? 'No details'}` : text || 'Finished without a text report.';
+        : last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted') ? `Task ${last.stopReason}: ${last.errorMessage ?? 'No details'}${last.stopReason === 'error' ? `\n\n${FAILED_RESUME}` : ''}` : text || 'Finished without a text report.';
     } catch (error) {
       transition(info, info.state === 'stopping' ? 'stopped' : 'failed');
       info.report = info.state === 'stopped' && live.stoppedBy ? stoppedReport(live.stoppedBy, session.getLastAssistantText()) : `${info.state}: ${String(error)}`;
