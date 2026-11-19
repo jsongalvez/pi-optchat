@@ -5,9 +5,10 @@ import type { FinishReason } from './runs.ts';
 // These are Pi's: the main agent, subagents and connected windows. Memory's own are in core/prompts.ts.
 
 /** Names the profile's subagent choice, so the agent has no gap to fill from memory when it spawns: unset means this
- * model, and the ids it knows from training drift, so the models tool is the only source for a named one. */
+ * model. The profile's AGENTS.md may assign models by kind of job, and this defers to it. The ids it knows from training
+ * drift, so the models tool is the only source for a named one. */
 export const modelsHint = ({ provider, model, thinking }: ModelChoice) =>
-  `Subagents run ${provider}/${model} at thinking ${thinking}: leave a task's model and thinking unset for that. Set either one only when the user asks for it. A named model takes its id from models(), never from memory: your training may not know the newest ones, and a family without a version ("Opus", "GPT") means the newest one.`;
+  `Subagents default to ${provider}/${model} at thinking ${thinking}. Give a task the model your instructions assign to its kind of job; otherwise leave model and thinking unset for the default. A named model needs an explicit thinking level and takes its id from models(), never from memory: your training may not know the newest ones, and a family without a version ("Opus", "GPT") means the newest one.`;
 /** What this agent's subagents get by default (`children`), and how a task overrides it, so the agent has no gap to fill from
  * memory when it spawns (the same reason as modelsHint). It is the profile's choice for subagents, not what the agent itself got. */
 export const memoryHint = (children: 'view' | 'none') => children === 'view'
