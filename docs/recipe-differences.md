@@ -9,7 +9,7 @@ The README has the summary table. This page has the detail: what changed in each
 - **Main agent.** The turn rules are the revised recipe's (2026-10-08) word for word, with three changes:
   - its paragraph on computers is left out;
   - reports start `[id] ` instead of `[Name]`;
-  - two sentences are added: don't poll anything slow (CI, a deploy) yourself, hand the watching to a subagent; and a message starting `[OptChat status]` is OptChat's own note, not the user.
+  - two sentences are added: start any command that may take more than a few minutes (a script, a build, a deploy, `gh run watch` for CI) with the `background` tool instead of sleeping or polling, since its exit report arrives as a `[bg-id]` message; and a message starting `[OptChat status]` is OptChat's own note, not the user.
 - **View doc.** Keeps the original's description of the view. It drops the "No message appears in full" line (untrue with Previous exchange on) and the list of when to zoom, adds one sentence on zooming out from a message to the summaries above it, and ends with the revised recipe's rule that memory comes first and zoom is the only way through it. Where the recipe says the view's "latest word on a thing is the truth", OptChat says it replaces anything older, and adds that what was said is not always true now: a fact can start later, and a tool can show a newer state. Apps keep their own state, and a tool can show something newer than the view (#279). An A/B (~1,000 runs, Opus 5.5 and Sonnet 5.5) found no regression, memory-first lookups included.
 - **Compactor.** The revised recipe's intro, view and Compactions sections, without its turn-only sections, and with:
   - OptChat's kinds: `talk` for replies, subagent reports as `work`;
@@ -18,7 +18,7 @@ The README has the summary table. This page has the detail: what changed in each
 - **Compactor instructions.** Unlike the recipe, the compactor doesn't get your instructions: an A/B found they added nothing (#112).
 - **Tool results.** A tool result's leaf summary also gets the raw tool call it answers, as a `<call>` block of context (#153 A/B: recall 3.88 → 4.22).
 - **Images.** A message's leaf summary gets the images it names after the task, each after its `[image <name>]`, with one sentence asking it to say what matters in each and keep each `[image <name>]`; such a message is summarized even when short, and its line may be longer than its source. A zoom's page doesn't send its images again. A model without image input gets none, and a provider that rejects them is asked once more by name only. Merges stay text. An A/B (Sonnet 5.5, 18 chats) kept image facts in 100% of leaves and 97% of roots, against 0% and 1% without, for about 1¢ an image.
-- **Subagent prompt.** The original's, plus a closing note on time: report progress on long tasks with `tell_parent`, and say so before waiting on something slow, so the main agent can go on.
+- **Subagent prompt.** The original's, plus a closing note on time: report progress on long tasks with `tell_parent`, and say so before waiting on something slow, so the main agent can go on. Its instructions also say never to block in one command for more than about a minute and to start anything longer with `background`, which keeps it alive until the command's exit report arrives.
 
 ## Numbers kept from the recipe
 

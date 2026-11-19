@@ -123,6 +123,15 @@ Ask in plain words, for example: "Spawn an agent to investigate this repository 
 
 More (MCP inheritance, per-task models, report formats, the "agents at work" status line, resume rules): [docs/subagents.md](docs/subagents.md).
 
+## Background commands
+
+The `background` tool (main agent and subagents) runs a long command (a script, a build, a campaign, `gh run watch`) without a model turn spent waiting on it.
+
+- **Start**: `background(command, cwd?, title?)` runs `bash -c` detached, in its own process group, and returns at once with its ID (`bg-<id>`), pid and log path. Stop one with `kill -- -<pid>`.
+- **Report**: when it exits, one message `[bg-<id>] <title or command> exited <code> after <duration>` with its log's last ~40 lines reaches the agent that started it, the way a subagent's report does. A subagent with a command still running waits for it instead of finishing.
+- **Restarts**: the command outlives Pi closing or `/reload`. The next start re-attaches (it checks the pid and exit file every 15 seconds, which costs no tokens) and delivers the report; if the subagent that started it is not running, the main agent gets it.
+- Logs, exit codes and records are in the profile's `runs/background/`. Needs `bash`, so not on Windows.
+
 ## Agents, usage and activity inspector
 
 An **Agents | Usage | Activity** bar sits below the input.
@@ -206,7 +215,7 @@ Profile data lives in `~/.optchat/profiles/<name>/` (override the root with `OPT
 | `AGENTS.md` | Profile instructions |
 | `config.json` | Main, compactor and subagent models, and settings |
 | `pending-inputs.json`, `pending-reports.json` | Recovery journals |
-| `runs/` | Subagent sessions and run metadata |
+| `runs/` | Subagent sessions and run metadata; `runs/background/`: background commands' logs, exit codes and records |
 | `usage.jsonl` | Usage ledger |
 | `memory.html` | Snapshot from `/optchat browse` |
 

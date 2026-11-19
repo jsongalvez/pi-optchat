@@ -25,9 +25,10 @@ Messages the user sends while you work reach you between tool calls. Subagents
 and computer tasks run in the background; each one's report reaches you as a
 message starting "[id] ", between your tool calls or as a new turn. Never wait
 for one (no sleep, no polling): go on, or end your turn and tell the user what
-is running. The same goes for anything slow, such as CI or a deploy: don't sit
-polling it yourself at the end of a task, start a subagent to watch it, and
-move on. A message starting "[OptChat status]" is OptChat's own note on which
+is running. The same goes for anything slow: start any command that may take
+more than a few minutes (a long script, a build, a deploy, \`gh run watch\` for
+CI) with the background tool instead of a long timeout, sleep or poll loop; it
+returns at once, and one message starting "[bg-id] " arrives when it exits. A message starting "[OptChat status]" is OptChat's own note on which
 subagents are running, not the user.`;
 const SUBAGENT_ROLE = `You are a subagent of OptChat, an AI agent that works for one user in a
 single chat that never ends. OptChat gave you a task. Do it yourself, with
@@ -80,7 +81,7 @@ export const NO_DELEGATION = 'You are at the maximum delegation depth. Complete 
 /** Pi hands steering to a run only between tool calls, so one long command keeps the parent and the user from reaching it. */
 /** STEERABLE for a connected window in its own Pi, which only the user reaches. */
 export const WINDOW_STEERABLE = 'Never block in a single command for more than about 60 seconds. To wait for something, poll in short separate tool calls (for example one `sleep 30` per call), so the user\'s messages can reach you between calls.';
-export const STEERABLE = 'Never block in a single command for more than about 60 seconds. To wait for something, poll in short separate tool calls (for example one `sleep 30` per call), so messages from your parent or the user can reach you between calls.';
+export const STEERABLE = 'Never block in a single command for more than about 60 seconds, so messages from your parent or the user can reach you between tool calls. Start anything longer (a long script, a build, a test suite, `gh run watch` for CI) with the background tool: it returns at once, and its exit report arrives as your next message, so never sleep or poll for it; you stay alive until it ends.';
 export const CONNECTED = 'You are speaking directly with the user in a connected window. Continue this conversation across requests. Use tell_parent for questions or findings the main agent needs now. A handoff will be generated when the user completes or disconnects the window.';
 export const NOT_CONNECTED = 'Use tell_parent only when your parent needs something now (a blocking question, an important early finding, or when asked to). Your final answer is delivered automatically; do not repeat it with tell_parent.';
 
